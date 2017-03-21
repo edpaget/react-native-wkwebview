@@ -29,6 +29,7 @@
 {
   WKWebView *_webView;
   NSString *_injectedJavaScript;
+  WKUserContentController *_userController;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame
@@ -38,11 +39,11 @@
     
     _automaticallyAdjustContentInsets = YES;
     _contentInset = UIEdgeInsetsZero;
-    
+
     WKWebViewConfiguration* config = [[WKWebViewConfiguration alloc] init];
-    WKUserContentController* userController = [[WKUserContentController alloc]init];
-    [userController addScriptMessageHandler:[[WeakScriptMessageDelegate alloc] initWithDelegate:self] name:@"reactNative"];
-    config.userContentController = userController;
+    _userController = [[WKUserContentController alloc] init];
+    [_userController addScriptMessageHandler:[[WeakScriptMessageDelegate alloc] initWithDelegate:self] name:@"reactNative"];
+    config.userContentController = _userController;
     
     _webView = [[WKWebView alloc] initWithFrame:self.bounds configuration:config];
     _webView.UIDelegate = self;
@@ -53,13 +54,25 @@
   return self;
 }
 
+- (NSDictionary *)getCookiesFor:(NSURLRequest *)request {
+  return [NSHTTPCookie requestHeaderFieldsWithCookies:[[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:request.URL]];
+}
+
+- (WKUserScript *)cookieScript:(NSDictionary *)cookies{
+  return [[WKUserScript alloc]
+              initWithSource:[NSString stringWithFormat:@"document.cookie = %@", cookies[@"Cookie"]]
+              injectionTime:WKUserScriptInjectionTimeAtDocumentStart forMainFrameOnly:NO];
+}
+
 RCT_NOT_IMPLEMENTED(- (instancetype)initWithCoder:(NSCoder *)aDecoder)
 
 - (void)loadRequest:(NSURLRequest *)request
 {
+  [_userController removeAllUserScripts];
   if (request.URL && _sendCookies) {
-    NSDictionary *cookies = [NSHTTPCookie requestHeaderFieldsWithCookies:[[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:request.URL]];
+    NSDictionary *cookies = [self getCookiesFor:request];
     if ([cookies objectForKey:@"Cookie"]) {
+      [_userController addUserScript:[self cookieScript:cookies]];
       NSMutableURLRequest *mutableRequest = request.mutableCopy;
       [mutableRequest addValue:cookies[@"Cookie"] forHTTPHeaderField:@"Cookie"];
       request = mutableRequest;
